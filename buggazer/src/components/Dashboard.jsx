@@ -57,9 +57,9 @@ export default function Dashboard() {
 
   // Bar gradient config for top sources
   const barGrads = [
-    'linear-gradient(90deg, #d9b0b0, #cfcfd1)',  // rose → silver
-    'linear-gradient(90deg, #bdb87a, #b2d3cc)',   // sage → mint
-    'linear-gradient(90deg, #7d9da7, #b2d3cc)',   // slate → mint
+    'linear-gradient(90deg, #d9b0b0, #cfcfd1)',  
+    'linear-gradient(90deg, #bdb87a, #b2d3cc)',  
+    'linear-gradient(90deg, #7d9da7, #b2d3cc)',   
     'linear-gradient(90deg, #cfcfd1, #b2d3cc)',
     'linear-gradient(90deg, #b2d3cc, #7d9da7)',
   ];

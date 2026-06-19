@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { EnvironmentProvider } from '../context/EnvironmentContext';
 import { SettingsProvider } from '../context/SettingsContext';
+import { ErrorsProvider } from '../context/ErrorsContext';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
 import LiveFeed from './LiveFeed';
@@ -11,6 +12,7 @@ import Settings from './Settings';
 
 export default function App() {
   return (
+    <ErrorsProvider>
     <SettingsProvider>
       <EnvironmentProvider>
         <BrowserRouter>
@@ -48,5 +50,6 @@ export default function App() {
         </BrowserRouter>
       </EnvironmentProvider>
     </SettingsProvider>
+    </ErrorsProvider>
   );
 }

@@ -1,32 +1,31 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEnvironment } from '../context/EnvironmentContext';
-import { initialErrors, generateLargeDataset } from '../data/errors';
-import { filterErrors, sortErrors, getSeverityConfig, formatTimestamp, formatRelative } from '../utils/helpers';
+import { useErrors } from '../context/ErrorsContext';
+import { filterErrors, sortErrors, getSeverityConfig, formatRelative } from '../utils/helpers';
 import TopBar from './TopBar';
-import SeverityBadge from './SeverityBadge';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const ROW_HEIGHT = 52; // px — each virtual row is exactly this tall
-const OVERSCAN   = 8;  // extra rows to render above/below viewport
+const ROW_HEIGHT = 52;
+const OVERSCAN   = 8;
 
-// Merge the real seed errors + 10 000 generated rows, generated once at module load
-const ALL_ERRORS = [...initialErrors, ...generateLargeDataset(10000)];
 
 const COLUMNS = [
-  { key: 'severity',    label: 'Sev',          width: '72px'  },
-  { key: 'message',     label: 'Error Message', width: '1fr'   },
+  { key: 'select',      label: '',             width: '36px'  },
+  { key: 'severity',    label: 'Sev',          width: '60px'  },
+  { key: 'message',     label: 'Error Message', width: '1fr'  },
   { key: 'service',     label: 'Service',       width: '140px' },
   { key: 'platform',    label: 'Platform',      width: '100px' },
   { key: 'environment', label: 'Env',           width: '110px' },
   { key: 'count',       label: 'Count',         width: '72px'  },
   { key: 'timestamp',   label: 'Time',          width: '150px' },
   { key: 'resolved',    label: 'Status',        width: '90px'  },
+  { key: 'actions',     label: '',              width: '44px'  },
 ];
 
 const GRID_COLS = COLUMNS.map(c => c.width).join(' ');
 
-// ── Severity dot ─────────────────────────────────────────────────────────────
+// ── Severity dot ──────────────────────────────────────────────────────────────
 function SevDot({ severity }) {
   const cfg = getSeverityConfig(severity);
   return (
@@ -41,7 +40,7 @@ function SevDot({ severity }) {
   );
 }
 
-// ── Environment pill ─────────────────────────────────────────────────────────
+// ── Environment pill ──────────────────────────────────────────────────────────
 const ENV_STYLES = {
   production:  { bg: 'rgba(217,176,176,0.18)', color: '#7a3f3f', border: 'rgba(217,176,176,0.45)' },
   staging:     { bg: 'rgba(189,184,122,0.18)', color: '#5c5730', border: 'rgba(189,184,122,0.45)' },
@@ -63,8 +62,21 @@ function EnvPill({ env }) {
   );
 }
 
-// ── A single virtualised row ─────────────────────────────────────────────────
-const VirtualRow = ({ error, style }) => {
+// ── Trash icon ────────────────────────────────────────────────────────────────
+function TrashIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
+    </svg>
+  );
+}
+
+// ── Virtual row ───────────────────────────────────────────────────────────────
+const VirtualRow = ({ error, style, selected, onSelect, onDelete }) => {
   const [hovered, setHovered] = useState(false);
   const cfg = getSeverityConfig(error.severity);
 
@@ -78,16 +90,29 @@ const VirtualRow = ({ error, style }) => {
         gap: '12px',
         padding: '0 20px',
         borderBottom: '1px solid rgba(207,207,209,0.22)',
-        background: hovered
-          ? `${cfg.bg}`
-          : 'transparent',
+        background: selected
+          ? 'rgba(196,184,245,0.12)'
+          : hovered ? cfg.bg : 'transparent',
         transition: 'background 0.15s',
         cursor: 'default',
         boxSizing: 'border-box',
+        outline: selected ? '1px solid rgba(196,184,245,0.35)' : 'none',
+        borderLeft: error.isLive ? '3px solid #b2d3cc' : '3px solid transparent',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Checkbox */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onSelect(error.id)}
+          onClick={e => e.stopPropagation()}
+          style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#7c5cbf' }}
+        />
+      </div>
+
       {/* Severity */}
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <SevDot severity={error.severity} />
@@ -98,11 +123,24 @@ const VirtualRow = ({ error, style }) => {
         fontSize: '12px',
         color: cfg.text,
         fontFamily: 'JetBrains Mono, monospace',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        display: 'flex', alignItems: 'center', gap: '6px',
       }}>
-        {error.message}
+        {error.isLive && (
+          <span style={{
+            fontSize: '9px', fontWeight: '700', letterSpacing: '0.06em',
+            background: 'rgba(178,211,204,0.3)',
+            color: '#2e5f58',
+            border: '1px solid rgba(178,211,204,0.7)',
+            borderRadius: '4px',
+            padding: '1px 5px',
+            flexShrink: 0,
+            animation: 'pulse 2s ease infinite',
+          }}>LIVE</span>
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {error.message}
+        </span>
       </div>
 
       {/* Service */}
@@ -150,54 +188,142 @@ const VirtualRow = ({ error, style }) => {
           {error.resolved ? 'Resolved' : 'Open'}
         </span>
       </div>
+
+      {/* Delete action */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button
+          title="Delete this error"
+          onClick={e => { e.stopPropagation(); onDelete([error.id]); }}
+          style={{
+            opacity: hovered ? 1 : 0,
+            transition: 'opacity 0.15s, background 0.15s',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '5px',
+            borderRadius: '6px',
+            color: '#c07070',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(192,112,112,0.12)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
+          <TrashIcon />
+        </button>
+      </div>
     </div>
   );
 };
 
-// ── Sort icon ────────────────────────────────────────────────────────────────
+// ── Sort icon ─────────────────────────────────────────────────────────────────
 function SortIcon({ col, sortKey, sortDir }) {
   if (sortKey !== col) return <span style={{ color: 'rgba(196,184,245,0.5)', marginLeft: '4px' }}>↕</span>;
   return <span style={{ color: '#7c5cbf', marginLeft: '4px' }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
 }
 
+// ── Confirm modal ─────────────────────────────────────────────────────────────
+function ConfirmModal({ message, onConfirm, onCancel }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(30,25,60,0.45)',
+      backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: '#fff',
+        borderRadius: '18px',
+        padding: '32px 36px',
+        maxWidth: '400px', width: '90%',
+        boxShadow: '0 20px 60px rgba(30,25,60,0.22)',
+        border: '1px solid rgba(196,184,245,0.4)',
+        textAlign: 'center',
+        animation: 'fadeIn 0.18s ease',
+      }}>
+        <div style={{ fontSize: '40px', marginBottom: '14px' }}>🗑️</div>
+        <h2 style={{ fontSize: '17px', fontWeight: '700', color: '#2d2b55', marginBottom: '10px' }}>
+          Delete History
+        </h2>
+        <p style={{ fontSize: '13px', color: '#7d8090', lineHeight: '1.6', marginBottom: '24px' }}>
+          {message}
+        </p>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '9px 22px',
+              borderRadius: '9px',
+              border: '1px solid rgba(207,207,209,0.6)',
+              background: 'rgba(247,246,254,0.9)',
+              color: '#7d8090',
+              fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              padding: '9px 22px',
+              borderRadius: '9px',
+              border: 'none',
+              background: 'linear-gradient(135deg, #c07070, #a04848)',
+              color: '#fff',
+              fontSize: '13px', fontWeight: '700', cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(192,112,112,0.35)',
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ErrorHistory() {
   const { environment } = useEnvironment();
-  const [search, setSearch]       = useState('');
-  const [useRegex, setUseRegex]   = useState(false);
-  const [severity, setSeverity]   = useState('all');
-  const [platform, setPlatform]   = useState('all');
-  const [sortKey, setSortKey]     = useState('timestamp');
-  const [sortDir, setSortDir]     = useState('desc');
+  const { errors, deleteErrors } = useErrors();
+  const [search, setSearch]         = useState('');
+  const [useRegex, setUseRegex]     = useState(false);
+  const [severity, setSeverity]     = useState('all');
+  const [platform, setPlatform]     = useState('all');
+  const [sortKey, setSortKey]       = useState('timestamp');
+  const [sortDir, setSortDir]       = useState('desc');
   const [regexError, setRegexError] = useState(false);
 
-  // Scrollable container ref — the virtualizer measures this
+  // ── Selection state ──────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // ── Confirm modal ────────────────────────────────────────────────────────
+  const [confirmModal, setConfirmModal] = useState(null); // { message, ids } | null
+
   const scrollRef = useRef(null);
 
-  // ── Filter + sort (memoised) ────────────────────────────────────────────
+  // ── Filter + sort ────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    // validate regex early for UX
     if (useRegex && search) {
       try { new RegExp(search); setRegexError(false); }
       catch { setRegexError(true); return []; }
     } else {
       setRegexError(false);
     }
-    const f = filterErrors(ALL_ERRORS, { search, useRegex, severity, platform, environment });
+    const f = filterErrors(errors, { search, useRegex, severity, platform, environment });
     return sortErrors(f, sortKey, sortDir);
-  }, [search, useRegex, severity, platform, environment, sortKey, sortDir]);
+  }, [errors, search, useRegex, severity, platform, environment, sortKey, sortDir]);
 
-  // Reset scroll to top whenever filters change
+  // Reset scroll when filters change
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [filtered]);
 
-  // ── Virtualizer ─────────────────────────────────────────────────────────
+  // ── Virtualizer ──────────────────────────────────────────────────────────
   const virtualizer = useVirtualizer({
-    count:         filtered.length,
+    count:            filtered.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize:  () => ROW_HEIGHT,
-    overscan:      OVERSCAN,
+    estimateSize:     () => ROW_HEIGHT,
+    overscan:         OVERSCAN,
   });
 
   // ── Sort handler ─────────────────────────────────────────────────────────
@@ -209,19 +335,73 @@ export default function ErrorHistory() {
     });
   }, []);
 
-  const totalRows   = virtualizer.getTotalSize();   // total pixel height
-  const virtualRows = virtualizer.getVirtualItems(); // only the visible slice
+  // ── Delete handler ───────────────────────────────────────────────────────
+  /** Execute a confirmed delete */
+  const doDelete = useCallback((ids) => {
+    deleteErrors(ids);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+    setConfirmModal(null);
+  }, [deleteErrors]);
+
+  const askDelete = useCallback((ids, message) => {
+    setConfirmModal({ ids, message });
+  }, []);
+
+  // ── Select helpers ───────────────────────────────────────────────────────
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every(e => selectedIds.has(e.id));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        filtered.forEach(e => next.delete(e.id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        filtered.forEach(e => next.add(e.id));
+        return next;
+      });
+    }
+  };
+
+  const selectedInView = filtered.filter(e => selectedIds.has(e.id));
+
+  const totalRows   = virtualizer.getTotalSize();
+  const virtualRows = virtualizer.getVirtualItems();
 
   return (
     <div className="fade-in">
+      {confirmModal && (
+        <ConfirmModal
+          message={confirmModal.message}
+          onConfirm={() => doDelete(confirmModal.ids)}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
+
       <TopBar
         title="Error History"
-        subtitle={`Virtual-scroll • ${filtered.length.toLocaleString()} / ${ALL_ERRORS.length.toLocaleString()} rows`}
+        subtitle={`Virtual-scroll • ${filtered.length.toLocaleString()} / ${errors.length.toLocaleString()} rows`}
       />
 
       <div style={{ padding: '28px' }}>
 
-        {/* ── Filters bar ──────────────────────────────────────────────── */}
+        {/* ── Filters bar ─────────────────────────────────────────────── */}
         <div style={{
           background: 'rgba(255,255,255,0.88)',
           border: '1px solid rgba(196,184,245,0.35)',
@@ -276,8 +456,7 @@ export default function ErrorHistory() {
                 color: useRegex ? '#7c5cbf' : '#9b96c0',
                 fontFamily: 'JetBrains Mono, monospace',
                 fontSize: '13px', fontWeight: '600', cursor: 'pointer',
-                transition: 'all 0.2s',
-                whiteSpace: 'nowrap',
+                transition: 'all 0.2s', whiteSpace: 'nowrap',
               }}
             >
               .* Regex {useRegex ? 'ON' : 'OFF'}
@@ -306,7 +485,7 @@ export default function ErrorHistory() {
             </select>
           </div>
 
-          {/* Result count badge */}
+          {/* Result count */}
           <div style={{ flexShrink: 0, paddingBottom: '2px' }}>
             <div style={{ fontSize: '13px', color: '#9b96c0', whiteSpace: 'nowrap' }}>
               <span style={{ fontSize: '20px', fontWeight: '800', color: '#2d2b55' }}>
@@ -314,6 +493,60 @@ export default function ErrorHistory() {
               </span>{' '}
               <span style={{ fontSize: '12px' }}>results</span>
             </div>
+          </div>
+
+          {/* ── Bulk delete actions ──────────────────────────────────── */}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginLeft: 'auto', flexShrink: 0 }}>
+            {selectedInView.length > 0 && (
+              <button
+                id="delete-selected-btn"
+                onClick={() =>
+                  askDelete(
+                    selectedInView.map(e => e.id),
+                    `Permanently delete ${selectedInView.length.toLocaleString()} selected error${selectedInView.length > 1 ? 's' : ''}? This cannot be undone.`
+                  )
+                }
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(192,112,112,0.45)',
+                  background: 'rgba(192,112,112,0.1)',
+                  color: '#c07070',
+                  fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                  transition: 'all 0.2s', whiteSpace: 'nowrap',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(192,112,112,0.18)'; e.currentTarget.style.borderColor = 'rgba(192,112,112,0.7)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(192,112,112,0.1)'; e.currentTarget.style.borderColor = 'rgba(192,112,112,0.45)'; }}
+              >
+                <TrashIcon size={13} />
+                Delete {selectedInView.length.toLocaleString()} selected
+              </button>
+            )}
+            <button
+              id="clear-all-btn"
+              onClick={() =>
+                askDelete(
+                  errors.map(e => e.id),
+                  `Permanently delete all ${errors.length.toLocaleString()} errors from history? This cannot be undone.`
+                )
+              }
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1px solid rgba(192,112,112,0.3)',
+                background: 'rgba(255,255,255,0.7)',
+                color: '#aab6b9',
+                fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                transition: 'all 0.2s', whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(192,112,112,0.08)'; e.currentTarget.style.color = '#c07070'; e.currentTarget.style.borderColor = 'rgba(192,112,112,0.5)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.7)'; e.currentTarget.style.color = '#aab6b9'; e.currentTarget.style.borderColor = 'rgba(192,112,112,0.3)'; }}
+            >
+              <TrashIcon size={13} />
+              Clear All
+            </button>
           </div>
         </div>
 
@@ -336,21 +569,31 @@ export default function ErrorHistory() {
             borderBottom: '1px solid rgba(196,184,245,0.3)',
             position: 'sticky', top: 0, zIndex: 2,
           }}>
-            {COLUMNS.map(col => (
+            {/* Select-all checkbox */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <input
+                type="checkbox"
+                checked={allFilteredSelected}
+                onChange={toggleSelectAll}
+                title="Select / deselect all visible rows"
+                style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#7c5cbf' }}
+              />
+            </div>
+            {COLUMNS.slice(1).map(col => (
+              col.key === 'actions' ? <div key="actions" /> :
               <div
                 key={col.key}
-                onClick={() => handleSort(col.key)}
+                onClick={() => col.key !== 'select' && handleSort(col.key)}
                 style={{
                   fontSize: '11px', fontWeight: '700',
                   color: sortKey === col.key ? '#7c5cbf' : '#9b96c0',
                   textTransform: 'uppercase', letterSpacing: '0.05em',
-                  cursor: 'pointer', userSelect: 'none',
-                  display: 'flex', alignItems: 'center',
-                  whiteSpace: 'nowrap',
+                  cursor: col.label ? 'pointer' : 'default', userSelect: 'none',
+                  display: 'flex', alignItems: 'center', whiteSpace: 'nowrap',
                 }}
               >
                 {col.label}
-                <SortIcon col={col.key} sortKey={sortKey} sortDir={sortDir} />
+                {col.label && <SortIcon col={col.key} sortKey={sortKey} sortDir={sortDir} />}
               </div>
             ))}
           </div>
@@ -368,16 +611,26 @@ export default function ErrorHistory() {
           >
             {filtered.length === 0 ? (
               <div style={{ padding: '80px', textAlign: 'center', color: '#9b96c0' }}>
-                <div style={{ fontSize: '36px', marginBottom: '10px' }}>🔍</div>
-                <div>No errors match your filters</div>
+                <div style={{ fontSize: '36px', marginBottom: '10px' }}>
+                  {errors.length === 0 ? '🎉' : '🔍'}
+                </div>
+                <div>
+                  {errors.length === 0
+                    ? 'All errors have been cleared.'
+                    : 'No errors match your filters'}
+                </div>
               </div>
             ) : (
-              /* Total-height spacer → gives the scrollbar its correct length */
               <div style={{ height: `${totalRows}px`, width: '100%', position: 'relative' }}>
                 {virtualRows.map(vRow => (
                   <VirtualRow
                     key={vRow.key}
                     error={filtered[vRow.index]}
+                    selected={selectedIds.has(filtered[vRow.index].id)}
+                    onSelect={toggleSelect}
+                    onDelete={(ids) =>
+                      askDelete(ids, `Permanently delete this error? This cannot be undone.`)
+                    }
                     style={{
                       position: 'absolute',
                       top: `${vRow.start}px`,
@@ -391,7 +644,7 @@ export default function ErrorHistory() {
             )}
           </div>
 
-          {/* Footer bar */}
+          {/* Footer */}
           <div style={{
             padding: '10px 20px',
             borderTop: '1px solid rgba(196,184,245,0.25)',
@@ -405,7 +658,12 @@ export default function ErrorHistory() {
               </strong>{' '}
               rendered of{' '}
               <strong style={{ color: '#2d2b55' }}>{filtered.length.toLocaleString()}</strong> rows
-              {' '}—{' '}scroll to see more
+              {selectedInView.length > 0 && (
+                <span style={{ marginLeft: '10px', color: '#7c5cbf', fontWeight: '600' }}>
+                  · {selectedInView.length.toLocaleString()} selected
+                </span>
+              )}
+              {' '}— scroll to see more
             </div>
             <div style={{
               display: 'flex', alignItems: 'center', gap: '6px',
